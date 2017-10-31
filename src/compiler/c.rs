@@ -56,14 +56,21 @@ pub enum Language {
     ObjectiveCxx,
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct Input {
+    /// The path to the input source file.
+    pub path: PathBuf,
+
+    /// The type of language used in the input source file.
+    pub language: Language,
+}
+
 /// The results of parsing a compiler commandline.
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct ParsedArguments {
     /// The input source file.
-    pub input: PathBuf,
-    /// The type of language used in the input source file.
-    pub language: Language,
+    pub input: Input,
     /// The file in which to generate dependencies.
     pub depfile: Option<PathBuf>,
     /// Output files, keyed by a simple name, like "obj".
@@ -237,7 +244,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
 
             let key = {
                 hash_key(&executable_digest,
-                         parsed_args.language,
+                         parsed_args.input.language,
                          &parsed_args.common_args,
                          &env_vars,
                          &preprocessor_result.stdout)

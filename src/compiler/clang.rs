@@ -21,7 +21,7 @@ use ::compiler::{
     write_temp_file,
 };
 use compiler::args::*;
-use compiler::c::{CCompilerImpl, CCompilerKind, Language, ParsedArguments};
+use compiler::c::{CCompilerImpl, CCompilerKind, Language, Input, ParsedArguments};
 use compiler::gcc::GCCArgAttribute::*;
 use futures::future::{self, Future};
 use futures_cpupool::CpuPool;
@@ -120,8 +120,8 @@ mod test {
     #[test]
     fn test_parse_arguments_simple() {
         let a = parses!("-c", "foo.c", "-o", "foo.o");
-        assert_eq!(Some("foo.c"), a.input.to_str());
-        assert_eq!(Language::C, a.language);
+        assert_eq!(Some("foo.c"), a.input.path.to_str());
+        assert_eq!(Language::C, a.input.language);
         assert_map_contains!(a.outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
         assert_eq!(1, a.outputs.len());
@@ -132,8 +132,8 @@ mod test {
     #[test]
     fn test_parse_arguments_values() {
         let a = parses!("-c", "foo.cxx", "-arch", "xyz", "-fabc","-I", "include", "-o", "foo.o", "-include", "file");
-        assert_eq!(Some("foo.cxx"), a.input.to_str());
-        assert_eq!(Language::Cxx, a.language);
+        assert_eq!(Some("foo.cxx"), a.input.path.to_str());
+        assert_eq!(Language::Cxx, a.input.language);
         assert_map_contains!(a.outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
         assert_eq!(1, a.outputs.len());
