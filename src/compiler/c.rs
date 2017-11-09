@@ -65,7 +65,7 @@ pub struct Source {
     pub language: Language,
 
     // Paths to the associated output files.
-    //pub outputs: HashMap<&'static str, PathBuf>,
+    pub outputs: HashMap<&'static str, PathBuf>,
 }
 
 /// The results of parsing a compiler commandline.
@@ -77,7 +77,6 @@ pub struct ParsedArguments {
     /// The file in which to generate dependencies.
     pub depfile: Option<PathBuf>,
     /// Output files, keyed by a simple name, like "obj".
-    pub outputs: HashMap<&'static str, PathBuf>,
     /// Commandline arguments for the preprocessor.
     pub preprocessor_args: Vec<OsString>,
     /// Commandline arguments for the preprocessor or the compiler.
@@ -86,9 +85,19 @@ pub struct ParsedArguments {
     pub msvc_show_includes: bool,
 }
 
+impl Source {
+    pub fn new(path: PathBuf, language: Language) -> Source {
+        Source {
+            path: path,
+            language: language,
+            outputs: HashMap::new(),
+        }
+    }
+}
+
 impl ParsedArguments {
     pub fn output_pretty(&self) -> Cow<str> {
-        self.outputs.get("obj")
+        self.source.outputs.get("obj")
             .and_then(|o| o.file_name())
             .map(|s| s.to_string_lossy())
             .unwrap_or(Cow::Borrowed("Unknown filename"))
@@ -288,7 +297,7 @@ impl<T: CommandCreatorSync, I: CCompilerImpl> Compilation<T> for CCompilation<I>
 
     fn outputs<'a>(&'a self) -> Box<Iterator<Item=(&'a str, &'a Path)> + 'a>
     {
-        Box::new(self.parsed_args.outputs.iter().map(|(k, v)| (*k, &**v)))
+        Box::new(self.parsed_args.source.outputs.iter().map(|(k, v)| (*k, &**v)))
     }
 }
 
