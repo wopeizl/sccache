@@ -273,9 +273,9 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
         }))
     }
 
-    fn output_pretty(&self) -> Cow<str>
+    fn output_pretty(&self, i: usize) -> Cow<str>
     {
-        self.parsed_args.sources[0].output_pretty()
+        self.parsed_args.sources[i].output_pretty()
     }
 
     fn box_clone(&self) -> Box<CompilerHasher<T>>

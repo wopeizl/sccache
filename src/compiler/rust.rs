@@ -678,7 +678,7 @@ impl<T> CompilerHasher<T> for RustHasher
         }))
     }
 
-    fn output_pretty(&self) -> Cow<str> {
+    fn output_pretty(&self, _: usize) -> Cow<str> {
         Cow::Borrowed(&self.parsed_args.crate_name)
     }
 

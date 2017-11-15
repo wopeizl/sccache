@@ -112,7 +112,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                              handle: Handle)
                              -> SFuture<(CompileResult, process::Output)>
     {
-        let out_pretty = self.output_pretty().into_owned();
+        let out_pretty = self.output_pretty(0).into_owned();
         debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
         let start = Instant::now();
         let result = self.generate_hash_key(0, &creator, &cwd, &env_vars, &pool);
@@ -282,7 +282,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
     ///
     /// This is primarily intended for debug logging and such, not for actual
     /// artifact generation.
-    fn output_pretty(&self) -> Cow<str>;
+    fn output_pretty(&self, i: usize) -> Cow<str>;
 
     fn box_clone(&self) -> Box<CompilerHasher<T>>;
 }

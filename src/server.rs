@@ -537,7 +537,7 @@ impl<C> SccacheService<C>
         } else {
             CacheControl::Default
         };
-        let out_pretty = hasher.output_pretty().into_owned();
+        let out_pretty = hasher.output_pretty(0).into_owned();
         let result = hasher.get_cached_or_compile(self.creator.clone(),
                                                   self.storage.clone(),
                                                   arguments,
