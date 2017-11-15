@@ -224,7 +224,7 @@ static ARGS: [(ArgInfo, MSVCArgAttribute); 20] = [
 pub fn parse_arguments(arguments: &[OsString],
                        cwd: &Path) -> CompilerArguments<ParsedArguments> {
     let mut output_arg = None;
-    let mut input_arg = None;
+    let mut sources = Vec::new();
     let mut common_args = vec!();
     let mut compilation = false;
     let mut debug_info = false;
@@ -274,11 +274,15 @@ pub fn parse_arguments(arguments: &[OsString],
             None => {
                 match item.arg {
                     Argument::Raw(ref val) => {
-                        if input_arg.is_some() {
-                            // Can't cache compilations with multiple inputs.
-                            return CompilerArguments::CannotCache("multiple input files");
-                        }
-                        input_arg = Some(PathBuf::from(val));
+
+                        let path = PathBuf::from(val);
+
+                        let language = match Language::from_file_name(&path) {
+                            Some(l) => l,
+                            None => return CompilerArguments::CannotCache("unknown source language"),
+                        };
+
+                        sources.push(Source::new(path, language));
                     }
                     Argument::UnknownFlag(ref flag) => common_args.push(flag.clone()),
                     _ => unreachable!(),
@@ -292,35 +296,49 @@ pub fn parse_arguments(arguments: &[OsString],
             _ => {}
         }
     }
+
     // We only support compilation.
     if !compilation {
         return CompilerArguments::NotCompilation;
     }
-    let mut source = match input_arg {
-        Some(input) => {
-            let language = match Language::from_file_name(Path::new(&input)) {
-                Some(l) => l,
-                None => return CompilerArguments::CannotCache("unknown source language"),
-            };
 
-            Source::new(input, language)
-        }
-        // We can't cache compilation without an input.
-        None => return CompilerArguments::CannotCache("no input file"),
-    };
-    match output_arg {
-        // If output file name is not given, use default naming rule
-        None => {
-            source.outputs.insert("obj", source.path.with_extension("obj"));
-        },
-        Some(o) => {
-            source.outputs.insert("obj", PathBuf::from(o));
-        },
+    // We can't cache compilation with zero input files.
+    if sources.is_empty() {
+        return CompilerArguments::CannotCache("no input file");
     }
+
+    match output_arg {
+        None => {
+            // If output file name is not given, use default naming rule for all
+            // sources.
+            for source in &mut sources {
+                source.outputs.insert("obj", source.path.with_extension("obj"));
+            }
+        }
+        Some(o) => {
+            if sources.len() == 1 {
+                sources[0].outputs.insert("obj", PathBuf::from(o));
+            } else {
+                // An output argument cannot be given if multiple source files
+                // are specified. The compiler will fail on this too.
+                return CompilerArguments::CannotCache(
+                    "multiple inputs with single output");
+            }
+        }
+    }
+
     // -Fd is not taken into account unless -Zi is given
     if debug_info {
         match pdb {
-            Some(p) => source.outputs.insert("pdb", p),
+            Some(p) => {
+                if sources.len() == 1 {
+                    // Assume that if the PDB path was specified on the command
+                    // line, it isn't shared with other object files.
+                    sources[0].outputs.insert("pdb", p)
+                } else {
+                    return CompilerArguments::CannotCache("shared pdb");
+                }
+            }
             None => {
                 // -Zi without -Fd defaults to vcxxx.pdb (where xxx depends on the
                 // MSVC version), and that's used for all compilations with the same
@@ -329,8 +347,9 @@ pub fn parse_arguments(arguments: &[OsString],
             }
         };
     }
+
     CompilerArguments::Ok(ParsedArguments {
-        sources: vec![source],
+        sources: sources,
         depfile: depfile.map(|d| d.into()),
         preprocessor_args: vec!(),
         common_args: common_args,
@@ -891,9 +910,42 @@ mod test {
     }
 
     #[test]
-    fn test_parse_arguments_too_many_inputs() {
-        assert_eq!(CompilerArguments::CannotCache("multiple input files"),
-                   _parse_arguments(&ovec!["-c", "foo.c", "-Fofoo.obj", "bar.c"]));
+    fn test_parse_arguments_many_inputs() {
+        let args = ovec!["-c", "-Z7", "foo.c", "bar.cpp"];
+        let ParsedArguments {
+            sources,
+            depfile: _,
+            preprocessor_args,
+            msvc_show_includes,
+            common_args,
+        } = match _parse_arguments(&args) {
+            CompilerArguments::Ok(args) => args,
+            o @ _ => panic!("Got unexpected parse result: {:?}", o),
+        };
+        assert!(true, "Parsed ok");
+        assert_eq!(
+            sources,
+            vec![
+                Source {
+                    path: PathBuf::from("foo.c"),
+                    language: Language::C,
+                    outputs: vec![
+                        ("obj", PathBuf::from("foo.obj")),
+                    ].into_iter().collect()
+                },
+                Source {
+                    path: PathBuf::from("bar.cpp"),
+                    language: Language::Cxx,
+                    outputs: vec![
+                        ("obj", PathBuf::from("bar.obj")),
+                    ].into_iter().collect()
+                },
+            ]
+        );
+
+        assert!(preprocessor_args.is_empty());
+        assert_eq!(common_args, ovec!["-Z7"]);
+        assert!(!msvc_show_includes);
     }
 
     #[test]
@@ -947,9 +999,12 @@ mod test {
     }
 
     #[test]
-    fn test_parse_arguments_missing_pdb() {
+    fn test_parse_arguments_shared_pdb() {
         assert_eq!(CompilerArguments::CannotCache("shared pdb"),
                    _parse_arguments(&ovec!["-c", "foo.c", "-Zi", "-Fofoo.obj"]));
+
+        assert_eq!(CompilerArguments::CannotCache("shared pdb"),
+                   _parse_arguments(&ovec!["-c", "-Zi", "foo.c", "bar.c"]));
     }
 
     #[test]
