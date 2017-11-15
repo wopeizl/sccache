@@ -213,7 +213,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
     where T: CommandCreatorSync,
           I: CCompilerImpl,
 {
-    fn source_files(self: Box<Self>) -> usize {
+    fn input_count(self: Box<Self>) -> usize {
         1
     }
 

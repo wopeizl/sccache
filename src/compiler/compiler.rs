@@ -85,9 +85,9 @@ impl<T: CommandCreatorSync> Clone for Box<Compiler<T>> {
 pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
     where T: CommandCreatorSync,
 {
-    /// The number of source files associated with this hasher. This is used to
+    /// The number of input files associated with this hasher. This is used to
     /// iterate over all of the source files.
-    fn source_files(self: Box<Self>) -> usize;
+    fn input_count(self: Box<Self>) -> usize;
 
     /// Given information about a compiler command, generate a hash key
     /// that can be used for cache lookups, as well as any additional

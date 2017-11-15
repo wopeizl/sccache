@@ -549,7 +549,7 @@ fn parse_arguments(arguments: &[OsString], cwd: &Path) -> CompilerArguments<Pars
 impl<T> CompilerHasher<T> for RustHasher
     where T: CommandCreatorSync,
 {
-    fn source_files(self: Box<Self>) -> usize {
+    fn input_count(self: Box<Self>) -> usize {
         1
     }
 
