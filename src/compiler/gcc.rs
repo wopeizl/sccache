@@ -167,12 +167,11 @@ where
     S: SearchableArgInfo<Info = (ArgInfo, GCCArgAttribute)>,
 {
     let mut output_arg = None;
-    let mut input_arg = None;
+    let mut sources = Vec::new();
     let mut dep_target = None;
     let mut common_args = vec!();
     let mut preprocessor_args = vec!();
     let mut compilation = false;
-    let mut multiple_input = false;
     let mut split_dwarf = false;
     let mut need_explicit_dep_target = false;
     let mut language = None;
@@ -219,10 +218,23 @@ where
             None => {
                 match item.arg {
                     Argument::Raw(ref val) => {
-                        if input_arg.is_some() {
-                            multiple_input = true;
-                        }
-                        input_arg = Some(PathBuf::from(val));
+                        let path = PathBuf::from(val);
+
+                        // Note that `-x <language>` applies to all source files
+                        // that follow it. If `-x` was not specified, the
+                        // language is deduced based on the source file
+                        // extension.
+                        let language = match language {
+                            Some(l) => l,
+                            None => {
+                                match Language::from_file_name(&path) {
+                                    Some(l) => l,
+                                    None => return CompilerArguments::CannotCache("unknown source language"),
+                                }
+                            }
+                        };
+
+                        sources.push(Source::new(path, language));
                     }
                     Argument::UnknownFlag(_) => {}
                     _ => unreachable!(),
@@ -263,40 +275,53 @@ where
     if !compilation {
         return CompilerArguments::NotCompilation;
     }
-    // Can't cache compilations with multiple inputs.
-    if multiple_input {
-        return CompilerArguments::CannotCache("multiple input files");
+
+    // We can't cache compilation without an input.
+    if sources.is_empty() {
+        return CompilerArguments::CannotCache("no input file");
     }
-    let source = match input_arg {
-        Some(i) => i,
-        // We can't cache compilation without an input.
-        None => return CompilerArguments::CannotCache("no input file"),
-    };
-    if language == None {
-        language = Language::from_file_name(Path::new(&source));
+
+    match output_arg {
+        None => {
+            // If output file name is not given, use default naming rule for all
+            // sources.
+            for source in &mut sources {
+                source.outputs.insert("obj", source.path.with_extension("o"));
+            }
+        }
+        Some(o) => {
+            if sources.len() == 1 {
+                sources[0].outputs.insert("obj", PathBuf::from(o));
+            } else {
+                // An output argument cannot be given if multiple source files
+                // are specified. The compiler will fail on this too.
+                return CompilerArguments::CannotCache(
+                    "multiple inputs with single output");
+            }
+        }
     }
-    let language = match language {
-        Some(l) => l,
-        None => return CompilerArguments::CannotCache("unknown source language"),
-    };
-    let mut source = Source::new(source, language);
-    let output = match output_arg {
-        // We can't cache compilation that doesn't go to a file
-        None => source.path.with_extension("o"),
-        Some(o) =>  PathBuf::from(o),
-    };
+
     if split_dwarf {
-        let dwo = output.with_extension("dwo");
-        source.outputs.insert("dwo", dwo);
+        // Each source also gets a ".dwo" file.
+        for source in &mut sources {
+            source.outputs.insert("dwo", source.path.with_extension("dwo"));
+        }
     }
+
     if need_explicit_dep_target {
-        preprocessor_args.push("-MT".into());
-        preprocessor_args.push(dep_target.unwrap_or(output.clone().into_os_string()));
+        if sources.len() == 1 {
+            preprocessor_args.push("-MT".into());
+            preprocessor_args.push(
+                dep_target.unwrap_or(sources[0].outputs["obj"]
+                                               .clone()
+                                               .into_os_string()));
+        } else {
+            return CompilerArguments::CannotCache("makefile deps with multiple inputs");
+        }
     }
-    source.outputs.insert("obj", output);
 
     CompilerArguments::Ok(ParsedArguments {
-        sources: vec![source],
+        sources: sources,
         depfile: None,
         preprocessor_args: preprocessor_args,
         common_args: common_args,
@@ -684,14 +709,48 @@ mod test {
     }
 
     #[test]
-    fn test_parse_arguments_too_many_inputs() {
-        assert_eq!(CompilerArguments::CannotCache("multiple input files"),
-                   _parse_arguments(&stringvec!["-c", "foo.c", "-o", "foo.o", "bar.c"]));
+    fn test_parse_arguments_many_inputs() {
+        let args = stringvec!["-c", "-gsplit-dwarf", "foo.c", "bar.cpp"];
+        let ParsedArguments {
+            sources,
+            depfile: _,
+            preprocessor_args,
+            msvc_show_includes,
+            common_args,
+        } = match _parse_arguments(&args) {
+            CompilerArguments::Ok(args) => args,
+            o @ _ => panic!("Got unexpected parse result: {:?}", o),
+        };
+        assert!(true, "Parsed ok");
+        assert_eq!(
+            sources,
+            vec![
+                Source {
+                    path: PathBuf::from("foo.c"),
+                    language: Language::C,
+                    outputs: vec![
+                        ("obj", PathBuf::from("foo.o")),
+                        ("dwo", PathBuf::from("foo.dwo")),
+                    ].into_iter().collect()
+                },
+                Source {
+                    path: PathBuf::from("bar.cpp"),
+                    language: Language::Cxx,
+                    outputs: vec![
+                        ("obj", PathBuf::from("bar.o")),
+                        ("dwo", PathBuf::from("bar.dwo")),
+                    ].into_iter().collect()
+                },
+            ]
+        );
+        assert!(preprocessor_args.is_empty());
+        assert_eq!(ovec!["-gsplit-dwarf"], common_args);
+        assert!(!msvc_show_includes);
     }
 
     #[test]
     fn test_parse_arguments_link() {
-        assert_eq!(CompilerArguments::NotCompilation,
+        assert_eq!(CompilerArguments::CannotCache("unknown source language"),
                    _parse_arguments(&stringvec!["-shared", "foo.o", "-o", "foo.so", "bar.o"]));
     }
 
