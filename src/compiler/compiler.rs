@@ -93,7 +93,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
     /// that can be used for cache lookups, as well as any additional
     /// information that can be reused for compilation if necessary.
     fn generate_hash_key(self: Box<Self>,
-                         index: usize,
+                         i: usize,
                          creator: &T,
                          cwd: &Path,
                          env_vars: &[(OsString, OsString)],

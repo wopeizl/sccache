@@ -296,7 +296,7 @@ where
     source.outputs.insert("obj", output);
 
     CompilerArguments::Ok(ParsedArguments {
-        source: source,
+        sources: vec![source],
         depfile: None,
         preprocessor_args: preprocessor_args,
         common_args: common_args,
@@ -313,7 +313,7 @@ pub fn preprocess<T>(creator: &T,
     where T: CommandCreatorSync
 {
     trace!("preprocess");
-    let language = match parsed_args.source.language {
+    let language = match parsed_args.sources[0].language {
         Language::C => "c",
         Language::Cxx => "c++",
         Language::ObjectiveC => "objective-c",
@@ -322,7 +322,7 @@ pub fn preprocess<T>(creator: &T,
     let mut cmd = creator.clone().new_command_sync(executable);
     cmd.arg("-x").arg(language)
         .arg("-E")
-        .arg(&parsed_args.source.path)
+        .arg(&parsed_args.sources[0].path)
         .args(&parsed_args.preprocessor_args)
         .args(&parsed_args.common_args)
         .env_clear()
@@ -345,7 +345,7 @@ pub fn compile<T>(creator: &T,
 {
     trace!("compile");
 
-    let out_file = match parsed_args.source.outputs.get("obj") {
+    let out_file = match parsed_args.sources[0].outputs.get("obj") {
         Some(obj) => obj,
         None => {
             return f_err("Missing object file output")
@@ -354,7 +354,7 @@ pub fn compile<T>(creator: &T,
 
     // Pass the language explicitly as we might have gotten it from the
     // command line.
-    let language = match parsed_args.source.language {
+    let language = match parsed_args.sources[0].language {
         Language::C => "c",
         Language::Cxx => "c++",
         Language::ObjectiveC => "objective-c",
@@ -363,7 +363,7 @@ pub fn compile<T>(creator: &T,
     let mut attempt = creator.clone().new_command_sync(executable);
     attempt.arg("-x").arg(language)
         .arg("-c")
-        .arg(&parsed_args.source.path)
+        .arg(&parsed_args.sources[0].path)
         .arg("-o").arg(&out_file)
         .args(&parsed_args.preprocessor_args)
         .args(&parsed_args.common_args)
@@ -457,7 +457,7 @@ mod test {
     fn test_parse_arguments_simple() {
         let args = stringvec!["-c", "foo.c", "-o", "foo.o"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -467,11 +467,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.c"), source.path.to_str());
-        assert_eq!(Language::C, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.c"), sources[0].path.to_str());
+        assert_eq!(Language::C, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert!(preprocessor_args.is_empty());
         assert!(common_args.is_empty());
         assert!(!msvc_show_includes);
@@ -481,7 +481,7 @@ mod test {
     fn test_parse_arguments_default_name() {
         let args = stringvec!["-c", "foo.c"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -491,11 +491,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.c"), source.path.to_str());
-        assert_eq!(Language::C, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.c"), sources[0].path.to_str());
+        assert_eq!(Language::C, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert!(preprocessor_args.is_empty());
         assert!(common_args.is_empty());
         assert!(!msvc_show_includes);
@@ -505,7 +505,7 @@ mod test {
     fn test_parse_arguments_split_dwarf() {
         let args = stringvec!["-gsplit-dwarf", "-c", "foo.cpp", "-o", "foo.o"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -515,13 +515,13 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.cpp"), source.path.to_str());
-        assert_eq!(Language::Cxx, source.language);
-        assert_map_contains!(source.outputs,
+        assert_eq!(Some("foo.cpp"), sources[0].path.to_str());
+        assert_eq!(Language::Cxx, sources[0].language);
+        assert_map_contains!(sources[0].outputs,
                              ("obj", PathBuf::from("foo.o")),
                              ("dwo", PathBuf::from("foo.dwo")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(2, source.outputs.len());
+        assert_eq!(2, sources[0].outputs.len());
         assert!(preprocessor_args.is_empty());
         assert_eq!(ovec!["-gsplit-dwarf"], common_args);
         assert!(!msvc_show_includes);
@@ -531,7 +531,7 @@ mod test {
     fn test_parse_arguments_extra() {
         let args = stringvec!["-c", "foo.cc", "-fabc", "-o", "foo.o", "-mxyz"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -541,11 +541,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.cc"), source.path.to_str());
-        assert_eq!(Language::Cxx, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.cc"), sources[0].path.to_str());
+        assert_eq!(Language::Cxx, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert!(preprocessor_args.is_empty());
         assert_eq!(ovec!["-fabc", "-mxyz"], common_args);
         assert!(!msvc_show_includes);
@@ -555,7 +555,7 @@ mod test {
     fn test_parse_arguments_values() {
         let args = stringvec!["-c", "foo.cxx", "-fabc", "-I", "include", "-o", "foo.o", "-include", "file"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -565,11 +565,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.cxx"), source.path.to_str());
-        assert_eq!(Language::Cxx, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.cxx"), sources[0].path.to_str());
+        assert_eq!(Language::Cxx, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert_eq!(ovec!["-Iinclude", "-include", "file"], preprocessor_args);
         assert_eq!(ovec!["-fabc"], common_args);
         assert!(!msvc_show_includes);
@@ -579,7 +579,7 @@ mod test {
     fn test_parse_arguments_preprocessor_args() {
         let args = stringvec!["-c", "foo.c", "-fabc", "-MF", "file", "-o", "foo.o", "-MQ", "abc"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -589,11 +589,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.c"), source.path.to_str());
-        assert_eq!(Language::C, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.c"), sources[0].path.to_str());
+        assert_eq!(Language::C, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert_eq!(ovec!["-MF", "file", "-MQ", "abc"], preprocessor_args);
         assert_eq!(ovec!["-fabc"], common_args);
         assert!(!msvc_show_includes);
@@ -603,7 +603,7 @@ mod test {
     fn test_parse_arguments_explicit_dep_target() {
         let args = stringvec!["-c", "foo.c", "-MT", "depfile", "-fabc", "-MF", "file", "-o", "foo.o"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -613,11 +613,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.c"), source.path.to_str());
-        assert_eq!(Language::C, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.c"), sources[0].path.to_str());
+        assert_eq!(Language::C, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert_eq!(ovec!["-MF", "file"], preprocessor_args);
         assert_eq!(ovec!["-fabc"], common_args);
         assert!(!msvc_show_includes);
@@ -627,7 +627,7 @@ mod test {
     fn test_parse_arguments_explicit_dep_target_needed() {
         let args = stringvec!["-c", "foo.c", "-MT", "depfile", "-fabc", "-MF", "file", "-o", "foo.o", "-MD"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -637,11 +637,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.c"), source.path.to_str());
-        assert_eq!(Language::C, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.c"), sources[0].path.to_str());
+        assert_eq!(Language::C, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert_eq!(ovec!["-MF", "file", "-MD", "-MT", "depfile"], preprocessor_args);
         assert_eq!(ovec!["-fabc"], common_args);
         assert!(!msvc_show_includes);
@@ -651,7 +651,7 @@ mod test {
     fn test_parse_arguments_dep_target_needed() {
         let args = stringvec!["-c", "foo.c", "-fabc", "-MF", "file", "-o", "foo.o", "-MD"];
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -661,11 +661,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.c"), source.path.to_str());
-        assert_eq!(Language::C, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.c"), sources[0].path.to_str());
+        assert_eq!(Language::C, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert_eq!(ovec!["-MF", "file", "-MD", "-MT", "foo.o"], preprocessor_args);
         assert_eq!(ovec!["-fabc"], common_args);
         assert!(!msvc_show_includes);
@@ -715,7 +715,7 @@ mod test {
         ").unwrap();
         let arg = format!("@{}", td.path().join("foo").display());
         let ParsedArguments {
-            source,
+            sources,
             depfile: _,
             preprocessor_args,
             msvc_show_includes,
@@ -725,11 +725,11 @@ mod test {
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         assert!(true, "Parsed ok");
-        assert_eq!(Some("foo.c"), source.path.to_str());
-        assert_eq!(Language::C, source.language);
-        assert_map_contains!(source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.c"), sources[0].path.to_str());
+        assert_eq!(Language::C, sources[0].language);
+        assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, source.outputs.len());
+        assert_eq!(1, sources[0].outputs.len());
         assert!(preprocessor_args.is_empty());
         assert!(common_args.is_empty());
         assert!(!msvc_show_includes);
@@ -740,11 +740,11 @@ mod test {
         let creator = new_creator();
         let f = TestFixture::new();
         let parsed_args = ParsedArguments {
-            source: Source {
+            sources: vec![Source {
                 path: "foo.c".into(),
                 language: Language::C,
                 outputs: vec![("obj", "foo.o".into())].into_iter().collect(),
-            },
+            }],
             depfile: None,
             preprocessor_args: vec!(),
             common_args: vec!(),

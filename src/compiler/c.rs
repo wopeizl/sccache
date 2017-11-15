@@ -72,7 +72,7 @@ pub struct Source {
 #[derive(Debug, PartialEq, Clone)]
 pub struct ParsedArguments {
     /// The compilation units. There must be at least one.
-    pub source: Source,
+    pub sources: Vec<Source>,
     /// The file in which to generate dependencies.
     pub depfile: Option<PathBuf>,
     /// Commandline arguments for the preprocessor.
@@ -218,7 +218,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
     }
 
     fn generate_hash_key(self: Box<Self>,
-                         index: usize,
+                         i: usize,
                          creator: &T,
                          cwd: &Path,
                          env_vars: &[(OsString, OsString)],
@@ -228,13 +228,13 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
         let me = *self;
         let CCompilerHasher { parsed_args, executable, executable_digest, compiler } = me;
         let result = compiler.preprocess(creator, &executable, &parsed_args, cwd, env_vars);
-        let out_pretty = parsed_args.source.output_pretty().into_owned();
+        let out_pretty = parsed_args.sources[i].output_pretty().into_owned();
         let env_vars = env_vars.to_vec();
         let result = result.map_err(move |e| {
             debug!("[{}]: preprocessor failed: {:?}", out_pretty, e);
             e
         });
-        let out_pretty = parsed_args.source.output_pretty().into_owned();
+        let out_pretty = parsed_args.sources[i].output_pretty().into_owned();
         Box::new(result.or_else(move |err| {
             match err {
                 Error(ErrorKind::ProcessError(output), _) => {
@@ -252,12 +252,12 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
             }
         }).and_then(move |preprocessor_result| {
             trace!("[{}]: Preprocessor output is {} bytes",
-                   parsed_args.source.output_pretty(),
+                   parsed_args.sources[i].output_pretty(),
                    preprocessor_result.stdout.len());
 
             let key = {
                 hash_key(&executable_digest,
-                         parsed_args.source.language,
+                         parsed_args.sources[i].language,
                          &parsed_args.common_args,
                          &env_vars,
                          &preprocessor_result.stdout)
@@ -275,7 +275,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
 
     fn output_pretty(&self) -> Cow<str>
     {
-        self.parsed_args.source.output_pretty()
+        self.parsed_args.sources[0].output_pretty()
     }
 
     fn box_clone(&self) -> Box<CompilerHasher<T>>
@@ -298,7 +298,8 @@ impl<T: CommandCreatorSync, I: CCompilerImpl> Compilation<T> for CCompilation<I>
 
     fn outputs<'a>(&'a self) -> Box<Iterator<Item=(&'a str, &'a Path)> + 'a>
     {
-        Box::new(self.parsed_args.source.outputs.iter().map(|(k, v)| (*k, &**v)))
+        // FIXME: Gather outputs from ALL sources.
+        Box::new(self.parsed_args.sources[0].outputs.iter().map(|(k, v)| (*k, &**v)))
     }
 }
 

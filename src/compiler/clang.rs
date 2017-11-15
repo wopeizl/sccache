@@ -120,11 +120,11 @@ mod test {
     #[test]
     fn test_parse_arguments_simple() {
         let a = parses!("-c", "foo.c", "-o", "foo.o");
-        assert_eq!(Some("foo.c"), a.source.path.to_str());
-        assert_eq!(Language::C, a.source.language);
-        assert_map_contains!(a.source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.c"), a.sources[0].path.to_str());
+        assert_eq!(Language::C, a.sources[0].language);
+        assert_map_contains!(a.sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, a.source.outputs.len());
+        assert_eq!(1, a.sources[0].outputs.len());
         assert!(a.preprocessor_args.is_empty());
         assert!(a.common_args.is_empty());
     }
@@ -132,11 +132,11 @@ mod test {
     #[test]
     fn test_parse_arguments_values() {
         let a = parses!("-c", "foo.cxx", "-arch", "xyz", "-fabc","-I", "include", "-o", "foo.o", "-include", "file");
-        assert_eq!(Some("foo.cxx"), a.source.path.to_str());
-        assert_eq!(Language::Cxx, a.source.language);
-        assert_map_contains!(a.source.outputs, ("obj", PathBuf::from("foo.o")));
+        assert_eq!(Some("foo.cxx"), a.sources[0].path.to_str());
+        assert_eq!(Language::Cxx, a.sources[0].language);
+        assert_map_contains!(a.sources[0].outputs, ("obj", PathBuf::from("foo.o")));
         //TODO: fix assert_map_contains to assert no extra keys!
-        assert_eq!(1, a.source.outputs.len());
+        assert_eq!(1, a.sources[0].outputs.len());
         assert_eq!(ovec!["-Iinclude", "-include", "file"], a.preprocessor_args);
         assert_eq!(ovec!["-arch", "xyz", "-fabc"], a.common_args);
     }

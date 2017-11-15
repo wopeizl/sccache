@@ -554,7 +554,7 @@ impl<T> CompilerHasher<T> for RustHasher
     }
 
     fn generate_hash_key(self: Box<Self>,
-                         index: usize,
+                         i: usize,
                          creator: &T,
                          cwd: &Path,
                          env_vars: &[(OsString, OsString)],
