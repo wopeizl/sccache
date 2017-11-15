@@ -549,7 +549,12 @@ fn parse_arguments(arguments: &[OsString], cwd: &Path) -> CompilerArguments<Pars
 impl<T> CompilerHasher<T> for RustHasher
     where T: CommandCreatorSync,
 {
+    fn source_files(self: Box<Self>) -> usize {
+        1
+    }
+
     fn generate_hash_key(self: Box<Self>,
+                         index: usize,
                          creator: &T,
                          cwd: &Path,
                          env_vars: &[(OsString, OsString)],
@@ -985,7 +990,8 @@ c:/foo/bar.rs:
         mock_dep_info(&creator, &["foo.rs", "bar.rs"]);
         mock_file_names(&creator, &["foo.rlib", "foo.a"]);
         let pool = CpuPool::new(1);
-        let res = hasher.generate_hash_key(&creator,
+        let res = hasher.generate_hash_key(0,
+                                           &creator,
                                            f.tempdir.path(),
                                            &[(OsString::from("CARGO_PKG_NAME"), OsString::from("foo")),
                                              (OsString::from("FOO"), OsString::from("bar")),
@@ -1053,7 +1059,7 @@ c:/foo/bar.rs:
         let pool = CpuPool::new(1);
         mock_dep_info(&creator, &["foo.rs"]);
         mock_file_names(&creator, &["foo.rlib"]);
-        hasher.generate_hash_key(&creator, f.tempdir.path(), env_vars, &pool).wait().unwrap().key
+        hasher.generate_hash_key(0, &creator, f.tempdir.path(), env_vars, &pool).wait().unwrap().key
     }
 
     fn nothing(_path: &Path) -> Result<()> { Ok(()) }

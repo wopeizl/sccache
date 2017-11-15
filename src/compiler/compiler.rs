@@ -85,10 +85,15 @@ impl<T: CommandCreatorSync> Clone for Box<Compiler<T>> {
 pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
     where T: CommandCreatorSync,
 {
+    /// The number of source files associated with this hasher. This is used to
+    /// iterate over all of the source files.
+    fn source_files(self: Box<Self>) -> usize;
+
     /// Given information about a compiler command, generate a hash key
     /// that can be used for cache lookups, as well as any additional
     /// information that can be reused for compilation if necessary.
     fn generate_hash_key(self: Box<Self>,
+                         index: usize,
                          creator: &T,
                          cwd: &Path,
                          env_vars: &[(OsString, OsString)],
@@ -110,7 +115,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
         let out_pretty = self.output_pretty().into_owned();
         debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
         let start = Instant::now();
-        let result = self.generate_hash_key(&creator, &cwd, &env_vars, &pool);
+        let result = self.generate_hash_key(0, &creator, &cwd, &env_vars, &pool);
         Box::new(result.then(move |res| -> SFuture<_> {
             debug!("[{}]: generate_hash_key took {}", out_pretty, fmt_duration_as_secs(&start.elapsed()));
             let (key, compilation) = match res {

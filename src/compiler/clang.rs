@@ -21,7 +21,7 @@ use ::compiler::{
     write_temp_file,
 };
 use compiler::args::*;
-use compiler::c::{CCompilerImpl, CCompilerKind, Language, Source, ParsedArguments};
+use compiler::c::{CCompilerImpl, CCompilerKind, Language, ParsedArguments};
 use compiler::gcc::GCCArgAttribute::*;
 use futures::future::{self, Future};
 use futures_cpupool::CpuPool;

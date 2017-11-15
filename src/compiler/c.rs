@@ -56,15 +56,14 @@ pub enum Language {
     ObjectiveCxx,
 }
 
+/// A compilation unit.
 #[derive(Debug, PartialEq, Clone)]
 pub struct Source {
-    /// The path to the input source file.
+    /// The path to the source file.
     pub path: PathBuf,
-
     /// The type of language used in the input source file.
     pub language: Language,
-
-    // Paths to the associated output files.
+    /// Output files, keyed by a simple name, like "obj".
     pub outputs: HashMap<&'static str, PathBuf>,
 }
 
@@ -72,11 +71,10 @@ pub struct Source {
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone)]
 pub struct ParsedArguments {
-    /// The input source file.
+    /// The compilation units. There must be at least one.
     pub source: Source,
     /// The file in which to generate dependencies.
     pub depfile: Option<PathBuf>,
-    /// Output files, keyed by a simple name, like "obj".
     /// Commandline arguments for the preprocessor.
     pub preprocessor_args: Vec<OsString>,
     /// Commandline arguments for the preprocessor or the compiler.
@@ -93,11 +91,9 @@ impl Source {
             outputs: HashMap::new(),
         }
     }
-}
 
-impl ParsedArguments {
     pub fn output_pretty(&self) -> Cow<str> {
-        self.source.outputs.get("obj")
+        self.outputs.get("obj")
             .and_then(|o| o.file_name())
             .map(|s| s.to_string_lossy())
             .unwrap_or(Cow::Borrowed("Unknown filename"))
@@ -217,7 +213,12 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
     where T: CommandCreatorSync,
           I: CCompilerImpl,
 {
+    fn source_files(self: Box<Self>) -> usize {
+        1
+    }
+
     fn generate_hash_key(self: Box<Self>,
+                         index: usize,
                          creator: &T,
                          cwd: &Path,
                          env_vars: &[(OsString, OsString)],
@@ -227,13 +228,13 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
         let me = *self;
         let CCompilerHasher { parsed_args, executable, executable_digest, compiler } = me;
         let result = compiler.preprocess(creator, &executable, &parsed_args, cwd, env_vars);
-        let out_pretty = parsed_args.output_pretty().into_owned();
+        let out_pretty = parsed_args.source.output_pretty().into_owned();
         let env_vars = env_vars.to_vec();
         let result = result.map_err(move |e| {
             debug!("[{}]: preprocessor failed: {:?}", out_pretty, e);
             e
         });
-        let out_pretty = parsed_args.output_pretty().into_owned();
+        let out_pretty = parsed_args.source.output_pretty().into_owned();
         Box::new(result.or_else(move |err| {
             match err {
                 Error(ErrorKind::ProcessError(output), _) => {
@@ -251,7 +252,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
             }
         }).and_then(move |preprocessor_result| {
             trace!("[{}]: Preprocessor output is {} bytes",
-                   parsed_args.output_pretty(),
+                   parsed_args.source.output_pretty(),
                    preprocessor_result.stdout.len());
 
             let key = {
@@ -274,7 +275,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
 
     fn output_pretty(&self) -> Cow<str>
     {
-        self.parsed_args.output_pretty()
+        self.parsed_args.source.output_pretty()
     }
 
     fn box_clone(&self) -> Box<CompilerHasher<T>>
