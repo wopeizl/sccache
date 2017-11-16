@@ -691,6 +691,7 @@ impl<T> Compilation<T> for RustCompilation
     where T: CommandCreatorSync,
 {
     fn compile(self: Box<Self>,
+               inputs: &[usize],
                creator: &T,
                cwd: &Path,
                env_vars: &[(OsString, OsString)])

@@ -112,12 +112,23 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                              handle: Handle)
                              -> SFuture<(CompileResult, process::Output)>
     {
-        let out_pretty = self.output_pretty(0).into_owned();
+        // TODO: Iterate over all inputs, joining all the results into a single
+        // future. Of the items that are not cached, compile them on one command
+        // line.
+
+        let index = 0;
+
+        let out_pretty = self.output_pretty(index).into_owned();
+
         debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
+
         let start = Instant::now();
-        let result = self.generate_hash_key(0, &creator, &cwd, &env_vars, &pool);
+
+        let result = self.generate_hash_key(index, &creator, &cwd, &env_vars, &pool);
+
         Box::new(result.then(move |res| -> SFuture<_> {
             debug!("[{}]: generate_hash_key took {}", out_pretty, fmt_duration_as_secs(&start.elapsed()));
+
             let (key, compilation) = match res {
                 Err(Error(ErrorKind::ProcessError(output), _)) => {
                     return f_ok((CompileResult::Error, output));
@@ -125,7 +136,9 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                 Err(e) => return f_err(e),
                 Ok(HashResult { key, compilation }) => (key, compilation),
             };
+
             trace!("[{}]: Hash key: {}", out_pretty, key);
+
             // If `ForceRecache` is enabled, we won't check the cache.
             let start = Instant::now();
             let cache_status = if cache_control == CacheControl::ForceRecache {
@@ -159,34 +172,42 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                 let miss_type = match result {
                     Ok(Some(Cache::Hit(mut entry))) => {
                         debug!("[{}]: Cache hit in {}", out_pretty, fmt_duration_as_secs(&duration));
+
                         let mut stdout = Vec::new();
                         let mut stderr = Vec::new();
                         drop(entry.get_object("stdout", &mut stdout));
                         drop(entry.get_object("stderr", &mut stderr));
+
                         let write = pool.spawn_fn(move ||{
                             for (key, path) in &outputs {
                                 let dir = match path.parent() {
                                     Some(d) => d,
                                     None => bail!("Output file without a parent directory!"),
                                 };
+
                                 // Write the cache entry to a tempfile and then atomically
                                 // move it to its final location so that other rustc invocations
                                 // happening in parallel don't see a partially-written file.
                                 let mut tmp = NamedTempFile::new_in(dir)?;
                                 let mode = entry.get_object(&key, &mut tmp)?;
                                 tmp.persist(path)?;
+
                                 if let Some(mode) = mode {
                                     set_file_mode(&path, mode)?;
                                 }
                             }
+
                             Ok(())
                         });
+
                         let output = process::Output {
                             status: exit_status(0),
                             stdout: stdout,
                             stderr: stderr,
                         };
+
                         let result = CompileResult::CacheHit(duration);
+
                         return Box::new(write.map(|_| {
                             (result, output)
                         })) as SFuture<_>
@@ -215,22 +236,27 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                 // Cache miss, so compile it.
                 let start = Instant::now();
                 let out_pretty = out_pretty.clone();
-                let compile = compilation.compile(&creator, &cwd, &env_vars);
+                let compile = compilation.compile(&[], &creator, &cwd, &env_vars);
+
                 Box::new(compile.and_then(move |(cacheable, compiler_result)| {
                     let duration = start.elapsed();
+
                     if !compiler_result.status.success() {
                         debug!("[{}]: Compiled but failed, not storing in cache",
                                out_pretty);
                         return f_ok((CompileResult::CompileFailed, compiler_result))
                             as SFuture<_>
                     }
+
                     if cacheable != Cacheable::Yes {
                         // Not cacheable
                         debug!("[{}]: Compiled but not cacheable",
                                out_pretty);
                         return f_ok((CompileResult::NotCacheable, compiler_result))
                     }
+
                     debug!("[{}]: Compiled in {}, storing in cache", out_pretty, fmt_duration_as_secs(&duration));
+
                     let write = pool.spawn_fn(move || -> Result<_> {
                         let mut entry = CacheWrite::new();
                         for (key, path) in &outputs {
@@ -242,13 +268,16 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                         }
                         Ok(entry)
                     });
+
                     let write = write.chain_err(|| "failed to zip up compiler outputs");
                     let o = out_pretty.clone();
+
                     Box::new(write.and_then(move |mut entry| {
                         if !compiler_result.stdout.is_empty() {
                             let mut stdout = &compiler_result.stdout[..];
                             entry.put_object("stdout", &mut stdout, None)?;
                         }
+
                         if !compiler_result.stderr.is_empty() {
                             let mut stderr = &compiler_result.stderr[..];
                             entry.put_object("stderr", &mut stderr, None)?;
@@ -257,6 +286,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                         // Try to finish storing the newly-written cache
                         // entry. We'll get the result back elsewhere.
                         let out_pretty = out_pretty.clone();
+
                         let future = storage.put(&key, entry)
                             .then(move |res| {
                                 match res {
@@ -268,7 +298,9 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                                     duration: duration,
                                 })
                             });
+
                         let future = Box::new(future);
+
                         Ok((CompileResult::CacheMiss(miss_type, duration, future), compiler_result))
                     }).chain_err(move || {
                         format!("failed to store `{}` to cache", o)
@@ -297,6 +329,7 @@ pub trait Compilation<T>
 {
     /// Given information about a compiler command, execute the compiler.
     fn compile(self: Box<Self>,
+               inputs: &[usize],
                creator: &T,
                cwd: &Path,
                env_vars: &[(OsString, OsString)])

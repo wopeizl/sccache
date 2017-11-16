@@ -60,6 +60,7 @@ impl CCompilerImpl for MSVC {
     }
 
     fn preprocess<T>(&self,
+                     input: usize,
                      creator: &T,
                      executable: &Path,
                      parsed_args: &ParsedArguments,
@@ -71,6 +72,7 @@ impl CCompilerImpl for MSVC {
     }
 
     fn compile<T>(&self,
+                  inputs: &[usize],
                   creator: &T,
                   executable: &Path,
                   parsed_args: &ParsedArguments,
@@ -316,6 +318,8 @@ pub fn parse_arguments(arguments: &[OsString],
             }
         }
         Some(o) => {
+            // TODO: Honor `-Fo` that specifies a directory (i.e., when it ends
+            // with a path separator).
             if sources.len() == 1 {
                 sources[0].outputs.insert("obj", PathBuf::from(o));
             } else {

@@ -56,6 +56,7 @@ impl CCompilerImpl for Clang {
     }
 
     fn preprocess<T>(&self,
+                     input: usize,
                      creator: &T,
                      executable: &Path,
                      parsed_args: &ParsedArguments,
@@ -63,10 +64,11 @@ impl CCompilerImpl for Clang {
                      env_vars: &[(OsString, OsString)])
                      -> SFuture<process::Output> where T: CommandCreatorSync
     {
-        gcc::preprocess(creator, executable, parsed_args, cwd, env_vars)
+        gcc::preprocess(input, creator, executable, parsed_args, cwd, env_vars)
     }
 
     fn compile<T>(&self,
+                  inputs: &[usize],
                   creator: &T,
                   executable: &Path,
                   parsed_args: &ParsedArguments,
@@ -75,7 +77,7 @@ impl CCompilerImpl for Clang {
                   -> SFuture<(Cacheable, process::Output)>
         where T: CommandCreatorSync
     {
-        gcc::compile(creator, executable, parsed_args, cwd, env_vars)
+        gcc::compile(inputs, creator, executable, parsed_args, cwd, env_vars)
     }
 }
 

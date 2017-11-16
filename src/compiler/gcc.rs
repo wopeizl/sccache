@@ -47,6 +47,7 @@ impl CCompilerImpl for GCC {
     }
 
     fn preprocess<T>(&self,
+                     input: usize,
                      creator: &T,
                      executable: &Path,
                      parsed_args: &ParsedArguments,
@@ -54,10 +55,11 @@ impl CCompilerImpl for GCC {
                      env_vars: &[(OsString, OsString)])
                      -> SFuture<process::Output> where T: CommandCreatorSync
     {
-        preprocess(creator, executable, parsed_args, cwd, env_vars)
+        preprocess(input, creator, executable, parsed_args, cwd, env_vars)
     }
 
     fn compile<T>(&self,
+                  inputs: &[usize],
                   creator: &T,
                   executable: &Path,
                   parsed_args: &ParsedArguments,
@@ -66,7 +68,7 @@ impl CCompilerImpl for GCC {
                   -> SFuture<(Cacheable, process::Output)>
         where T: CommandCreatorSync
     {
-        compile(creator, executable, parsed_args, cwd, env_vars)
+        compile(inputs, creator, executable, parsed_args, cwd, env_vars)
     }
 }
 
@@ -329,7 +331,8 @@ where
     })
 }
 
-pub fn preprocess<T>(creator: &T,
+pub fn preprocess<T>(input: usize,
+                     creator: &T,
                      executable: &Path,
                      parsed_args: &ParsedArguments,
                      cwd: &Path,
@@ -347,7 +350,7 @@ pub fn preprocess<T>(creator: &T,
     let mut cmd = creator.clone().new_command_sync(executable);
     cmd.arg("-x").arg(language)
         .arg("-E")
-        .arg(&parsed_args.sources[0].path)
+        .arg(&parsed_args.sources[input].path)
         .args(&parsed_args.preprocessor_args)
         .args(&parsed_args.common_args)
         .env_clear()
@@ -360,7 +363,8 @@ pub fn preprocess<T>(creator: &T,
     run_input_output(cmd, None)
 }
 
-pub fn compile<T>(creator: &T,
+pub fn compile<T>(inputs: &[usize],
+              creator: &T,
               executable: &Path,
               parsed_args: &ParsedArguments,
               cwd: &Path,

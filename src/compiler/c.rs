@@ -152,6 +152,7 @@ pub trait CCompilerImpl: Clone + fmt::Debug + Send + 'static {
                        cwd: &Path) -> CompilerArguments<ParsedArguments>;
     /// Run the C preprocessor with the specified set of arguments.
     fn preprocess<T>(&self,
+                     input: usize,
                      creator: &T,
                      executable: &Path,
                      parsed_args: &ParsedArguments,
@@ -161,6 +162,7 @@ pub trait CCompilerImpl: Clone + fmt::Debug + Send + 'static {
     /// Run the C compiler with the specified set of arguments, using the
     /// previously-generated `preprocessor_output` as input if possible.
     fn compile<T>(&self,
+                  inputs: &[usize],
                   creator: &T,
                   executable: &Path,
                   parsed_args: &ParsedArguments,
@@ -227,7 +229,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
     {
         let me = *self;
         let CCompilerHasher { parsed_args, executable, executable_digest, compiler } = me;
-        let result = compiler.preprocess(creator, &executable, &parsed_args, cwd, env_vars);
+        let result = compiler.preprocess(i, creator, &executable, &parsed_args, cwd, env_vars);
         let out_pretty = parsed_args.sources[i].output_pretty().into_owned();
         let env_vars = env_vars.to_vec();
         let result = result.map_err(move |e| {
@@ -286,6 +288,7 @@ impl<T, I> CompilerHasher<T> for CCompilerHasher<I>
 
 impl<T: CommandCreatorSync, I: CCompilerImpl> Compilation<T> for CCompilation<I> {
     fn compile(self: Box<Self>,
+               inputs: &[usize],
                creator: &T,
                cwd: &Path,
                env_vars: &[(OsString, OsString)])
@@ -293,7 +296,7 @@ impl<T: CommandCreatorSync, I: CCompilerImpl> Compilation<T> for CCompilation<I>
     {
         let me = *self;
         let CCompilation { parsed_args, executable, compiler } = me;
-        compiler.compile(creator, &executable, &parsed_args, cwd, env_vars)
+        compiler.compile(inputs, creator, &executable, &parsed_args, cwd, env_vars)
     }
 
     fn outputs<'a>(&'a self) -> Box<Iterator<Item=(&'a str, &'a Path)> + 'a>
