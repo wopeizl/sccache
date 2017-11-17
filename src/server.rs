@@ -26,7 +26,7 @@ use compiler::{
     get_compiler_info,
 };
 use filetime::FileTime;
-use futures::future;
+use futures::{future, stream};
 use futures::sync::mpsc;
 use futures::task::{self, Task};
 use futures::{Stream, Sink, Async, AsyncSink, Poll, StartSend, Future};
@@ -537,15 +537,25 @@ impl<C> SccacheService<C>
         } else {
             CacheControl::Default
         };
+
         let out_pretty = hasher.output_pretty(0).into_owned();
-        let result = hasher.get_cached_or_compile(self.creator.clone(),
-                                                  self.storage.clone(),
-                                                  arguments,
-                                                  cwd,
-                                                  env_vars,
-                                                  cache_control,
-                                                  self.pool.clone(),
-                                                  self.handle.clone());
+
+        let mut results = Vec::new();
+
+        for index in 0..hasher.input_count() {
+            results.push(hasher.get_cached_or_compile(index,
+                                                      self.creator.clone(),
+                                                      self.storage.clone(),
+                                                      arguments,
+                                                      cwd,
+                                                      env_vars,
+                                                      cache_control,
+                                                      self.pool.clone(),
+                                                      self.handle.clone()));
+        }
+
+        let stream = stream::futures_unordered(&results);
+
         let me = self.clone();
         let task = result.then(move |result| {
             let mut cache_write = None;

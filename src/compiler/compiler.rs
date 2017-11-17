@@ -102,6 +102,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
     /// Look up a cached compile result in `storage`. If not found, run the
     /// compile and store the result.
     fn get_cached_or_compile(self: Box<Self>,
+                             index: usize,
                              creator: T,
                              storage: Arc<Storage>,
                              arguments: Vec<OsString>,
@@ -112,12 +113,6 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                              handle: Handle)
                              -> SFuture<(CompileResult, process::Output)>
     {
-        // TODO: Iterate over all inputs, joining all the results into a single
-        // future. Of the items that are not cached, compile them on one command
-        // line.
-
-        let index = 0;
-
         let out_pretty = self.output_pretty(index).into_owned();
 
         debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
@@ -775,7 +770,8 @@ mod test {
             o @ _ => panic!("Bad result from parse_arguments: {:?}", o),
         };
         let hasher2 = hasher.clone();
-        let (cached, res) = hasher.get_cached_or_compile(creator.clone(),
+        let (cached, res) = hasher.get_cached_or_compile(0,
+                                                         creator.clone(),
                                                          storage.clone(),
                                                          arguments.clone(),
                                                          cwd.to_path_buf(),
@@ -800,7 +796,8 @@ mod test {
         // The preprocessor invocation.
         next_command(&creator, Ok(MockChild::new(exit_status(0), "preprocessor output", "")));
         // There should be no actual compiler invocation.
-        let (cached, res) = hasher2.get_cached_or_compile(creator.clone(),
+        let (cached, res) = hasher2.get_cached_or_compile(0,
+                                                          creator.clone(),
                                                           storage.clone(),
                                                           arguments,
                                                           cwd.to_path_buf(),
@@ -856,7 +853,8 @@ mod test {
             o @ _ => panic!("Bad result from parse_arguments: {:?}", o),
         };
         let hasher2 = hasher.clone();
-        let (cached, res) = hasher.get_cached_or_compile(creator.clone(),
+        let (cached, res) = hasher.get_cached_or_compile(0,
+                                                         creator.clone(),
                                                          storage.clone(),
                                                          arguments.clone(),
                                                          cwd.to_path_buf(),
@@ -882,7 +880,8 @@ mod test {
         // The preprocessor invocation.
         next_command(&creator, Ok(MockChild::new(exit_status(0), "preprocessor output", "")));
         // There should be no actual compiler invocation.
-        let (cached, res) = hasher2.get_cached_or_compile(creator,
+        let (cached, res) = hasher2.get_cached_or_compile(0,
+                                                          creator,
                                                           storage,
                                                           arguments,
                                                           cwd.to_path_buf(),
@@ -939,7 +938,8 @@ mod test {
         };
         // The cache will return an error.
         storage.next_get(f_err("Some Error"));
-        let (cached, res) = hasher.get_cached_or_compile(creator.clone(),
+        let (cached, res) = hasher.get_cached_or_compile(0,
+                                                         creator.clone(),
                                                          storage.clone(),
                                                          arguments.clone(),
                                                          cwd.to_path_buf(),
@@ -1006,7 +1006,8 @@ mod test {
             o @ _ => panic!("Bad result from parse_arguments: {:?}", o),
         };
         let hasher2 = hasher.clone();
-        let (cached, res) = hasher.get_cached_or_compile(creator.clone(),
+        let (cached, res) = hasher.get_cached_or_compile(0,
+                                                         creator.clone(),
                                                          storage.clone(),
                                                          arguments.clone(),
                                                          cwd.to_path_buf(),
@@ -1028,7 +1029,8 @@ mod test {
         assert_eq!(COMPILER_STDERR, res.stderr.as_slice());
         // Now compile again, but force recaching.
         fs::remove_file(&obj).unwrap();
-        let (cached, res) = hasher2.get_cached_or_compile(creator,
+        let (cached, res) = hasher2.get_cached_or_compile(0,
+                                                          creator,
                                                           storage,
                                                           arguments,
                                                           cwd.to_path_buf(),
@@ -1077,7 +1079,8 @@ mod test {
             CompilerArguments::Ok(h) => h,
             o @ _ => panic!("Bad result from parse_arguments: {:?}", o),
         };
-        let (cached, res) = hasher.get_cached_or_compile(creator,
+        let (cached, res) = hasher.get_cached_or_compile(0,
+                                                         creator,
                                                          storage,
                                                          arguments,
                                                          cwd.to_path_buf(),
