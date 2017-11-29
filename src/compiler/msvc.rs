@@ -276,7 +276,6 @@ pub fn parse_arguments(arguments: &[OsString],
             None => {
                 match item.arg {
                     Argument::Raw(ref val) => {
-
                         let path = PathBuf::from(val);
 
                         let language = match Language::from_file_name(&path) {
@@ -314,13 +313,34 @@ pub fn parse_arguments(arguments: &[OsString],
             // If output file name is not given, use default naming rule for all
             // sources.
             for source in &mut sources {
-                source.outputs.insert("obj", source.path.with_extension("obj"));
+                let source_file_name = match source.path.file_name() {
+                    Some(p) => Path::new(p),
+                    None => &source.path,
+                };
+
+                source.outputs.insert("obj", source_file_name.with_extension("obj"));
             }
         }
         Some(o) => {
-            // TODO: Honor `-Fo` that specifies a directory (i.e., when it ends
-            // with a path separator).
-            if sources.len() == 1 {
+            let mut path = PathBuf::from(o);
+
+            let is_dir = match path.to_str() {
+                Some(s) => s.ends_with("/") || s.ends_with("\\"),
+                None => false,
+            };
+
+            if is_dir {
+                // If a directory is specified, construct the real path to the
+                // object file.
+                for source in &mut sources {
+                    let source_file_name = match source.path.file_name() {
+                        Some(p) => Path::new(p),
+                        None => &source.path,
+                    };
+
+                    path.push(source_file_name.with_extension("obj"));
+                }
+            } else if sources.len() == 1 {
                 sources[0].outputs.insert("obj", PathBuf::from(o));
             } else {
                 // An output argument cannot be given if multiple source files
@@ -798,6 +818,32 @@ mod test {
         assert_map_contains!(sources[0].outputs, ("obj", PathBuf::from("foo.obj")));
         //TODO: fix assert_map_contains to assert no extra keys!
         assert_eq!(1, sources[0].outputs.len());
+        assert!(preprocessor_args.is_empty());
+        assert!(common_args.is_empty());
+        assert!(!msvc_show_includes);
+    }
+
+    #[test]
+    fn test_parse_arguments_output_dir() {
+        let args = ovec!["-c", r"-Fox64/Debug/", "../foo.c"];
+        let ParsedArguments {
+            input,
+            language,
+            depfile: _,
+            outputs,
+            preprocessor_args,
+            msvc_show_includes,
+            common_args,
+        } = match _parse_arguments(&args) {
+            CompilerArguments::Ok(args) => args,
+            o @ _ => panic!("Got unexpected parse result: {:?}", o),
+        };
+        assert!(true, "Parsed ok");
+        assert_eq!(Some("../foo.c"), input.to_str());
+        assert_eq!(Language::C, language);
+        assert_map_contains!(outputs, ("obj", PathBuf::from("x64/Debug/foo.obj")));
+        //TODO: fix assert_map_contains to assert no extra keys!
+        assert_eq!(1, outputs.len());
         assert!(preprocessor_args.is_empty());
         assert!(common_args.is_empty());
         assert!(!msvc_show_includes);
