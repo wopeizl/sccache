@@ -278,15 +278,18 @@ impl<T> Compiler<T> for Rust
     /// * We don't support `-o file`.
     fn parse_arguments(&self,
                        arguments: &[OsString],
-                       cwd: &Path) -> CompilerArguments<Box<CompilerHasher<T> + 'static>>
+                       cwd: &Path) -> CompilerArguments<Vec<Box<CompilerHasher<T> + 'static>>>
     {
         match parse_arguments(arguments, cwd) {
-            CompilerArguments::Ok(args) => {
-                CompilerArguments::Ok(Box::new(RustHasher {
-                    executable: self.executable.clone(),
-                    compiler_shlibs_digests: self.compiler_shlibs_digests.clone(),
-                    parsed_args: args,
-                }))
+            CompilerArguments::Ok(sets) => {
+                CompilerArguments::Ok(sets.into_iter().map(|args| {
+                    let x: Box<CompilerHasher<T> + 'static> = Box::new(RustHasher {
+                        executable: self.executable.clone(),
+                        compiler_shlibs_digests: self.compiler_shlibs_digests.clone(),
+                        parsed_args: args,
+                    });
+                    x
+                }).collect())
             }
             CompilerArguments::NotCompilation => CompilerArguments::NotCompilation,
             CompilerArguments::CannotCache(why) => CompilerArguments::CannotCache(why),
@@ -353,7 +356,7 @@ static ARGS: [(ArgInfo, RustArgAttribute); 33] = [
     take_arg!("-o", Path, CanBeSeparated, TooHard),
 ];
 
-fn parse_arguments(arguments: &[OsString], cwd: &Path) -> CompilerArguments<ParsedArguments>
+fn parse_arguments(arguments: &[OsString], cwd: &Path) -> CompilerArguments<Vec<ParsedArguments>>
 {
     let mut args = vec![];
 
@@ -536,25 +539,20 @@ fn parse_arguments(arguments: &[OsString], cwd: &Path) -> CompilerArguments<Pars
     // Cargo doesn't deterministically order --externs, and we need the hash inputs in a
     // deterministic order.
     externs.sort();
-    CompilerArguments::Ok(ParsedArguments {
+    CompilerArguments::Ok(vec![ParsedArguments {
         arguments: args,
         output_dir: output_dir.into(),
         externs: externs,
         staticlibs: staticlibs,
         crate_name: crate_name.to_string(),
         dep_info: dep_info.map(|s| s.into()),
-    })
+    }])
 }
 
 impl<T> CompilerHasher<T> for RustHasher
     where T: CommandCreatorSync,
 {
-    fn input_count(self: Box<Self>) -> usize {
-        1
-    }
-
     fn generate_hash_key(self: Box<Self>,
-                         _: usize,
                          creator: &T,
                          cwd: &Path,
                          env_vars: &[(OsString, OsString)],
@@ -678,7 +676,7 @@ impl<T> CompilerHasher<T> for RustHasher
         }))
     }
 
-    fn output_pretty(&self, _: usize) -> Cow<str> {
+    fn output_pretty(&self) -> Cow<str> {
         Cow::Borrowed(&self.parsed_args.crate_name)
     }
 
@@ -691,7 +689,6 @@ impl<T> Compilation<T> for RustCompilation
     where T: CommandCreatorSync,
 {
     fn compile(self: Box<Self>,
-               inputs: &[usize],
                creator: &T,
                cwd: &Path,
                env_vars: &[(OsString, OsString)])
@@ -729,7 +726,7 @@ mod test {
     use std::sync::{Arc,Mutex};
     use test::utils::*;
 
-    fn _parse_arguments(arguments: &[String]) -> CompilerArguments<ParsedArguments>
+    fn _parse_arguments(arguments: &[String]) -> CompilerArguments<Vec<ParsedArguments>>
     {
         let arguments = arguments.iter().map(OsString::from).collect::<Vec<_>>();
         parse_arguments(&arguments, ".".as_ref())
@@ -756,14 +753,14 @@ mod test {
 
     #[test]
     fn test_parse_arguments_simple() {
-        let h = parses!("--emit", "link", "foo.rs", "--out-dir", "out", "--crate-name", "foo");
+        let h = parses!("--emit", "link", "foo.rs", "--out-dir", "out", "--crate-name", "foo").into_iter().next().unwrap();
         assert_eq!(h.output_dir.to_str(), Some("out"));
         assert!(h.dep_info.is_none());
         assert!(h.externs.is_empty());
-        let h = parses!("--emit=link", "foo.rs", "--out-dir", "out", "--crate-name=foo");
+        let h = parses!("--emit=link", "foo.rs", "--out-dir", "out", "--crate-name=foo").into_iter().next().unwrap();
         assert_eq!(h.output_dir.to_str(), Some("out"));
         assert!(h.dep_info.is_none());
-        let h = parses!("--emit", "link", "foo.rs", "--out-dir=out", "--crate-name=foo");
+        let h = parses!("--emit", "link", "foo.rs", "--out-dir=out", "--crate-name=foo").into_iter().next().unwrap();
         assert_eq!(h.output_dir.to_str(), Some("out"));
         assert_eq!(parses!("--emit", "link", "-C", "opt-level=1", "foo.rs",
                            "--out-dir", "out", "--crate-name", "foo"),
@@ -771,7 +768,7 @@ mod test {
                            "--out-dir=out", "--crate-name=foo"));
         let h = parses!("--emit", "link,dep-info", "foo.rs", "--out-dir", "out",
                         "--crate-name", "my_crate",
-                        "-C", "extra-filename=-abcxyz");
+                        "-C", "extra-filename=-abcxyz").into_iter().next().unwrap();
         assert_eq!(h.output_dir.to_str(), Some("out"));
         assert_eq!(h.dep_info.unwrap().to_str().unwrap(), "my_crate-abcxyz.d");
         fails!("--emit", "link", "--out-dir", "out", "--crate-name=foo");
@@ -788,7 +785,7 @@ mod test {
                         "--out-dir", "/foo/target/debug/deps",
                         "-L", "dependency=/foo/target/debug/deps",
                         "--extern", "libc=/foo/target/debug/deps/liblibc-89a24418d48d484a.rlib",
-                        "--extern", "log=/foo/target/debug/deps/liblog-2f7366be74992849.rlib");
+                        "--extern", "log=/foo/target/debug/deps/liblog-2f7366be74992849.rlib").into_iter().next().unwrap();
         assert_eq!(h.output_dir.to_str(), Some("/foo/target/debug/deps"));
         assert_eq!(h.crate_name, "foo");
         assert_eq!(h.dep_info.unwrap().to_str().unwrap(),
@@ -800,7 +797,7 @@ mod test {
     fn test_parse_arguments_dep_info_no_extra_filename() {
         let h = parses!("--crate-name", "foo", "src/lib.rs",
                         "--emit=dep-info,link",
-                        "--out-dir", "/out");
+                        "--out-dir", "/out").into_iter().next().unwrap();
         assert_eq!(h.dep_info, Some("foo.d".into()));
     }
 
@@ -991,8 +988,7 @@ c:/foo/bar.rs:
         mock_dep_info(&creator, &["foo.rs", "bar.rs"]);
         mock_file_names(&creator, &["foo.rlib", "foo.a"]);
         let pool = CpuPool::new(1);
-        let res = hasher.generate_hash_key(0,
-                                           &creator,
+        let res = hasher.generate_hash_key(&creator,
                                            f.tempdir.path(),
                                            &[(OsString::from("CARGO_PKG_NAME"), OsString::from("foo")),
                                              (OsString::from("FOO"), OsString::from("bar")),
@@ -1036,7 +1032,10 @@ c:/foo/bar.rs:
     {
         let f = TestFixture::new();
         let parsed_args = match parse_arguments(args, &f.tempdir.path()) {
-            CompilerArguments::Ok(parsed_args) => parsed_args,
+            CompilerArguments::Ok(args) => {
+                assert_eq!(args.len(), 1);
+                args.into_iter().next().unwrap()
+            }
             o @ _ => panic!("Got unexpected parse result: {:?}", o),
         };
         // Just use empty files for sources.
@@ -1060,7 +1059,7 @@ c:/foo/bar.rs:
         let pool = CpuPool::new(1);
         mock_dep_info(&creator, &["foo.rs"]);
         mock_file_names(&creator, &["foo.rlib"]);
-        hasher.generate_hash_key(0, &creator, f.tempdir.path(), env_vars, &pool).wait().unwrap().key
+        hasher.generate_hash_key(&creator, f.tempdir.path(), env_vars, &pool).wait().unwrap().key
     }
 
     fn nothing(_path: &Path) -> Result<()> { Ok(()) }

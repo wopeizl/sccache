@@ -26,7 +26,7 @@ use compiler::{
     get_compiler_info,
 };
 use filetime::FileTime;
-use futures::{future, stream};
+use futures::future;
 use futures::sync::mpsc;
 use futures::task::{self, Task};
 use futures::{Stream, Sink, Async, AsyncSink, Poll, StartSend, Future};
@@ -495,13 +495,16 @@ impl<C> SccacheService<C>
                 // Now check that we can handle this compiler with
                 // the provided commandline.
                 match c.parse_arguments(&cmd, &cwd) {
-                    CompilerArguments::Ok(hasher) => {
+                    CompilerArguments::Ok(hashers) => {
                         debug!("parse_arguments: Ok: {:?}", cmd);
                         stats.requests_executed += 1;
                         let (tx, rx) = Body::pair();
-                        self.start_compile_task(hasher, cmd, cwd, env_vars, tx);
-                        let res = CompileResponse::CompileStarted;
-                        return Message::WithBody(Response::Compile(res), rx)
+
+                        for hasher in hashers.into_iter() {
+                            self.start_compile_task(hasher, cmd, cwd, env_vars, tx);
+                            let res = CompileResponse::CompileStarted;
+                            return Message::WithBody(Response::Compile(res), rx)
+                        }
                     }
                     CompilerArguments::CannotCache(why) => {
                         //TODO: save counts of why
@@ -537,25 +540,15 @@ impl<C> SccacheService<C>
         } else {
             CacheControl::Default
         };
-
-        let out_pretty = hasher.output_pretty(0).into_owned();
-
-        let mut results = Vec::new();
-
-        for index in 0..hasher.input_count() {
-            results.push(hasher.get_cached_or_compile(index,
-                                                      self.creator.clone(),
-                                                      self.storage.clone(),
-                                                      arguments,
-                                                      cwd,
-                                                      env_vars,
-                                                      cache_control,
-                                                      self.pool.clone(),
-                                                      self.handle.clone()));
-        }
-
-        let stream = stream::futures_unordered(&results);
-
+        let out_pretty = hasher.output_pretty().into_owned();
+        let result = hasher.get_cached_or_compile(self.creator.clone(),
+                                                  self.storage.clone(),
+                                                  arguments,
+                                                  cwd,
+                                                  env_vars,
+                                                  cache_control,
+                                                  self.pool.clone(),
+                                                  self.handle.clone());
         let me = self.clone();
         let task = result.then(move |result| {
             let mut cache_write = None;
