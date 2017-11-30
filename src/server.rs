@@ -30,6 +30,7 @@ use futures::future;
 use futures::sync::mpsc;
 use futures::task::{self, Task};
 use futures::{Stream, Sink, Async, AsyncSink, Poll, StartSend, Future};
+use futures::stream::FuturesUnordered;
 use futures_cpupool::CpuPool;
 use mock_command::{
     CommandCreatorSync,
@@ -500,11 +501,9 @@ impl<C> SccacheService<C>
                         stats.requests_executed += 1;
                         let (tx, rx) = Body::pair();
 
-                        for hasher in hashers.into_iter() {
-                            self.start_compile_task(hasher, cmd, cwd, env_vars, tx);
-                            let res = CompileResponse::CompileStarted;
-                            return Message::WithBody(Response::Compile(res), rx)
-                        }
+                        self.start_compile_task(hashers, cwd, env_vars, tx);
+                        let res = CompileResponse::CompileStarted;
+                        return Message::WithBody(Response::Compile(res), rx)
                     }
                     CompilerArguments::CannotCache(why) => {
                         //TODO: save counts of why
@@ -527,8 +526,7 @@ impl<C> SccacheService<C>
     /// a compile result in the cache or execute the compilation and store
     /// the result in the cache.
     fn start_compile_task(&self,
-                          hasher: Box<CompilerHasher<C>>,
-                          arguments: Vec<OsString>,
+                          hashers: Vec<Box<CompilerHasher<C>>>,
                           cwd: PathBuf,
                           env_vars: Vec<(OsString, OsString)>,
                           tx: mpsc::Sender<Result<Response>>) {
@@ -540,17 +538,23 @@ impl<C> SccacheService<C>
         } else {
             CacheControl::Default
         };
-        let out_pretty = hasher.output_pretty().into_owned();
-        let result = hasher.get_cached_or_compile(self.creator.clone(),
-                                                  self.storage.clone(),
-                                                  arguments,
-                                                  cwd,
-                                                  env_vars,
-                                                  cache_control,
-                                                  self.pool.clone(),
-                                                  self.handle.clone());
+
+        let mut stream = FuturesUnordered::new();
+
+        for hasher in hashers {
+            stream.push(hasher.get_cached_or_compile(self.creator.clone(),
+                                                     self.storage.clone(),
+                                                     cwd.clone(),
+                                                     env_vars.clone(),
+                                                     cache_control,
+                                                     self.pool.clone(),
+                                                     self.handle.clone()));
+        }
+
+        //let out_pretty = hasher.output_pretty().into_owned();
         let me = self.clone();
-        let task = result.then(move |result| {
+
+        let stream = stream.then(move |result| -> Result<CompileFinished> {
             let mut cache_write = None;
             let mut stats = me.stats.borrow_mut();
             let mut res = CompileFinished::default();
@@ -597,6 +601,8 @@ impl<C> SccacheService<C>
                     };
                     res.stdout = stdout;
                     res.stderr = stderr;
+
+                    Ok(res)
                 }
                 Err(Error(ErrorKind::ProcessError(output), _)) => {
                     debug!("Compilation failed: {:?}", output);
@@ -607,51 +613,100 @@ impl<C> SccacheService<C>
                     };
                     res.stdout = output.stdout;
                     res.stderr = output.stderr;
+
+                    Ok(res)
                 }
                 Err(err) => {
                     use std::fmt::Write;
 
-                    error!("[{:?}] fatal error: {}", out_pretty, err);
+                    //error!("[{:?}] fatal error: {}", out_pretty, err);
 
                     let mut error = format!("sccache: encountered fatal error\n");
                     drop(writeln!(error, "sccache: error : {}", err));
                     for e in err.iter() {
-                        error!("[{:?}] \t{}", out_pretty, e);
+                        //error!("[{:?}] \t{}", out_pretty, e);
                         drop(writeln!(error, "sccache:  cause: {}", e));
                     }
                     stats.cache_errors += 1;
                     //TODO: figure out a better way to communicate this?
                     res.retcode = Some(-2);
                     res.stderr = error.into_bytes();
+
+                    Ok(res)
                 }
-            };
-            let send = tx.send(Ok(Response::CompileFinished(res)));
+            }
 
-            let me = me.clone();
-            let cache_write = cache_write.then(move |result| {
-                match result {
-                    Err(e) => {
-                        debug!("Error executing cache write: {}", e);
-                        me.stats.borrow_mut().cache_write_errors += 1;
-                    }
-                    //TODO: save cache stats!
-                    Ok(Some(info)) => {
-                        debug!("[{}]: Cache write finished in {}",
-                               info.object_file_pretty,
-                               fmt_duration_as_secs(&info.duration));
-                        me.stats.borrow_mut().cache_writes += 1;
-                        me.stats.borrow_mut().cache_write_duration += info.duration;
-                    }
-
-                    Ok(None) => {}
-                }
-                Ok(())
-            });
-
-            send.join(cache_write).then(|_| Ok(()))
+//            let me = me.clone();
+//            let cache_write = cache_write.then(move |result| {
+//                match result {
+//                    Err(e) => {
+//                        debug!("Error executing cache write: {}", e);
+//                        me.stats.borrow_mut().cache_write_errors += 1;
+//                    }
+//                    //TODO: save cache stats!
+//                    Ok(Some(info)) => {
+//                        debug!("[{}]: Cache write finished in {}",
+//                               info.object_file_pretty,
+//                               fmt_duration_as_secs(&info.duration));
+//                        me.stats.borrow_mut().cache_writes += 1;
+//                        me.stats.borrow_mut().cache_write_duration += info.duration;
+//                    }
+//
+//                    Ok(None) => {}
+//                }
+//                Ok(())
+//            });
         });
 
-        self.handle.spawn(task);
+        // Combine individual compilation responses into a single response. This
+        // involves concatenating the output of each response and propagating
+        // any non-zero exit code.
+        let combined = stream.collect().then(move |result| {
+            let response = match result {
+                Ok(responses) => {
+                    let mut responses = responses.into_iter();
+
+                    let mut response = responses.next()
+                                                .unwrap_or(CompileFinished::default());
+
+                    for r in responses {
+                        // A non-zero exit code overrides a zero exit code.
+                        match r.retcode {
+                            Some(retcode) => {
+                                if retcode != 0 {
+                                    response.retcode = Some(retcode);
+                                }
+                            }
+                            None => {}
+                        };
+
+                        // Only allow the first signal to override.
+                        if response.signal.is_none() {
+                            response.signal = r.signal;
+                        }
+
+                        // Concatenate stdout
+                        response.stdout.extend_from_slice(&r.stdout);
+                        response.stderr.extend_from_slice(&r.stderr);
+                    }
+
+                    response
+                }
+                Err(_) => {
+                    // TODO: Handle this error better.
+                    CompileFinished {
+                        retcode: Some(1),
+                        signal: None,
+                        stdout: Vec::new(),
+                        stderr: Vec::from("Internal sccache error.".as_bytes()),
+                    }
+                }
+            };
+
+            tx.send(Ok(Response::CompileFinished(response))).then(|_| Ok(()))
+        });
+
+        self.handle.spawn(combined);
     }
 }
 

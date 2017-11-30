@@ -99,7 +99,6 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
     fn get_cached_or_compile(self: Box<Self>,
                              creator: T,
                              storage: Arc<Storage>,
-                             arguments: Vec<OsString>,
                              cwd: PathBuf,
                              env_vars: Vec<(OsString, OsString)>,
                              cache_control: CacheControl,
@@ -109,7 +108,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
     {
         let out_pretty = self.output_pretty().into_owned();
 
-        debug!("[{}]: get_cached_or_compile: {:?}", out_pretty, arguments);
+        debug!("[{}]: get_cached_or_compile", out_pretty);
 
         let start = Instant::now();
 
@@ -451,7 +450,7 @@ pub enum Cacheable {
 }
 
 /// Control of caching behavior.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum CacheControl {
     /// Default caching behavior.
     Default,
@@ -768,7 +767,6 @@ mod test {
         let hasher2 = hasher.clone();
         let (cached, res) = hasher.get_cached_or_compile(creator.clone(),
                                                          storage.clone(),
-                                                         arguments.clone(),
                                                          cwd.to_path_buf(),
                                                          vec![],
                                                          CacheControl::Default,
@@ -793,7 +791,6 @@ mod test {
         // There should be no actual compiler invocation.
         let (cached, res) = hasher2.get_cached_or_compile(creator.clone(),
                                                           storage.clone(),
-                                                          arguments,
                                                           cwd.to_path_buf(),
                                                           vec![],
                                                           CacheControl::Default,
@@ -852,7 +849,6 @@ mod test {
         let hasher2 = hasher.clone();
         let (cached, res) = hasher.get_cached_or_compile(creator.clone(),
                                                          storage.clone(),
-                                                         arguments.clone(),
                                                          cwd.to_path_buf(),
                                                          vec![],
                                                          CacheControl::Default,
@@ -878,7 +874,6 @@ mod test {
         // There should be no actual compiler invocation.
         let (cached, res) = hasher2.get_cached_or_compile(creator,
                                                           storage,
-                                                          arguments,
                                                           cwd.to_path_buf(),
                                                           vec![],
                                                           CacheControl::Default,
@@ -938,7 +933,6 @@ mod test {
         storage.next_get(f_err("Some Error"));
         let (cached, res) = hasher.get_cached_or_compile(creator.clone(),
                                                          storage.clone(),
-                                                         arguments.clone(),
                                                          cwd.to_path_buf(),
                                                          vec![],
                                                          CacheControl::Default,
@@ -1008,7 +1002,6 @@ mod test {
         let hasher2 = hasher.clone();
         let (cached, res) = hasher.get_cached_or_compile(creator.clone(),
                                                          storage.clone(),
-                                                         arguments.clone(),
                                                          cwd.to_path_buf(),
                                                          vec![],
                                                          CacheControl::Default,
@@ -1030,7 +1023,6 @@ mod test {
         fs::remove_file(&obj).unwrap();
         let (cached, res) = hasher2.get_cached_or_compile(creator,
                                                           storage,
-                                                          arguments,
                                                           cwd.to_path_buf(),
                                                           vec![],
                                                           CacheControl::ForceRecache,
@@ -1082,7 +1074,6 @@ mod test {
         };
         let (cached, res) = hasher.get_cached_or_compile(creator,
                                                          storage,
-                                                         arguments,
                                                          cwd.to_path_buf(),
                                                          vec![],
                                                          CacheControl::Default,
