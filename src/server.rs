@@ -542,19 +542,20 @@ impl<C> SccacheService<C>
         let mut stream = FuturesUnordered::new();
 
         for hasher in hashers {
-            stream.push(hasher.get_cached_or_compile(self.creator.clone(),
-                                                     self.storage.clone(),
-                                                     cwd.clone(),
-                                                     env_vars.clone(),
-                                                     cache_control,
-                                                     self.pool.clone(),
-                                                     self.handle.clone()));
+            let compile = hasher.get_cached_or_compile(self.creator.clone(),
+                                                       self.storage.clone(),
+                                                       cwd.clone(),
+                                                       env_vars.clone(),
+                                                       cache_control,
+                                                       self.pool.clone(),
+                                                       self.handle.clone());
+            stream.push(compile);
         }
 
         //let out_pretty = hasher.output_pretty().into_owned();
         let me = self.clone();
 
-        let stream = stream.then(move |result| -> Result<CompileFinished> {
+        let stream = stream.then(move |result| {
             let mut cache_write = None;
             let mut stats = me.stats.borrow_mut();
             let mut res = CompileFinished::default();
@@ -601,8 +602,6 @@ impl<C> SccacheService<C>
                     };
                     res.stdout = stdout;
                     res.stderr = stderr;
-
-                    Ok(res)
                 }
                 Err(Error(ErrorKind::ProcessError(output), _)) => {
                     debug!("Compilation failed: {:?}", output);
@@ -613,8 +612,6 @@ impl<C> SccacheService<C>
                     };
                     res.stdout = output.stdout;
                     res.stderr = output.stderr;
-
-                    Ok(res)
                 }
                 Err(err) => {
                     use std::fmt::Write;
@@ -631,31 +628,30 @@ impl<C> SccacheService<C>
                     //TODO: figure out a better way to communicate this?
                     res.retcode = Some(-2);
                     res.stderr = error.into_bytes();
-
-                    Ok(res)
                 }
-            }
+            };
 
-//            let me = me.clone();
-//            let cache_write = cache_write.then(move |result| {
-//                match result {
-//                    Err(e) => {
-//                        debug!("Error executing cache write: {}", e);
-//                        me.stats.borrow_mut().cache_write_errors += 1;
-//                    }
-//                    //TODO: save cache stats!
-//                    Ok(Some(info)) => {
-//                        debug!("[{}]: Cache write finished in {}",
-//                               info.object_file_pretty,
-//                               fmt_duration_as_secs(&info.duration));
-//                        me.stats.borrow_mut().cache_writes += 1;
-//                        me.stats.borrow_mut().cache_write_duration += info.duration;
-//                    }
-//
-//                    Ok(None) => {}
-//                }
-//                Ok(())
-//            });
+            let me = me.clone();
+            cache_write.then(move |result| -> Result<CompileFinished> {
+                match result {
+                    Err(e) => {
+                        debug!("Error executing cache write: {}", e);
+                        me.stats.borrow_mut().cache_write_errors += 1;
+                    }
+                    //TODO: save cache stats!
+                    Ok(Some(info)) => {
+                        debug!("[{}]: Cache write finished in {}",
+                               info.object_file_pretty,
+                               fmt_duration_as_secs(&info.duration));
+                        me.stats.borrow_mut().cache_writes += 1;
+                        me.stats.borrow_mut().cache_write_duration += info.duration;
+                    }
+
+                    Ok(None) => {}
+                }
+
+                Ok(res)
+            })
         });
 
         // Combine individual compilation responses into a single response. This

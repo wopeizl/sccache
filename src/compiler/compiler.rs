@@ -23,7 +23,7 @@ use compiler::clang::Clang;
 use compiler::gcc::GCC;
 use compiler::msvc::MSVC;
 use compiler::rust::Rust;
-use futures::{Future, IntoFuture};
+use futures::{future, Future, IntoFuture};
 use futures_cpupool::CpuPool;
 use mock_command::{
     CommandChild,
@@ -53,6 +53,8 @@ use util::fmt_duration_as_secs;
 use tokio_core::reactor::{Handle, Timeout};
 
 use errors::*;
+
+type BoxFuture<T> = Box<Future<Item = T, Error = Error> + Send>;
 
 /// Supported compilers.
 #[derive(Debug, PartialEq, Clone)]
@@ -104,7 +106,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                              cache_control: CacheControl,
                              pool: CpuPool,
                              handle: Handle)
-                             -> SFuture<(CompileResult, process::Output)>
+                             -> BoxFuture<(CompileResult, process::Output)>
     {
         let out_pretty = self.output_pretty().into_owned();
 
@@ -114,14 +116,14 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
 
         let result = self.generate_hash_key(&creator, &cwd, &env_vars, &pool);
 
-        Box::new(result.then(move |res| -> SFuture<_> {
+        Box::new(result.then(move |res| -> BoxFuture<_> {
             debug!("[{}]: generate_hash_key took {}", out_pretty, fmt_duration_as_secs(&start.elapsed()));
 
             let (key, compilation) = match res {
                 Err(Error(ErrorKind::ProcessError(output), _)) => {
-                    return f_ok((CompileResult::Error, output));
+                    return Box::new(future::ok((CompileResult::Error, output)));
                 }
-                Err(e) => return f_err(e),
+                Err(e) => return Box::new(future::err(e)),
                 Ok(HashResult { key, compilation }) => (key, compilation),
             };
 
@@ -150,7 +152,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
             });
 
             // Check the result of the cache lookup.
-            Box::new(cache_status.then(move |result| {
+            Box::new(cache_status.then(move |result| -> BoxFuture<_> {
                 let duration = start.elapsed();
                 let pwd = Path::new(&cwd);
                 let outputs = compilation.outputs()
@@ -198,7 +200,7 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
 
                         return Box::new(write.map(|_| {
                             (result, output)
-                        })) as SFuture<_>
+                        })) as BoxFuture<_>
                     }
                     Ok(Some(Cache::Miss)) => {
                         debug!("[{}]: Cache miss in {}", out_pretty, fmt_duration_as_secs(&duration));
@@ -226,21 +228,20 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                 let out_pretty = out_pretty.clone();
                 let compile = compilation.compile(&creator, &cwd, &env_vars);
 
-                Box::new(compile.and_then(move |(cacheable, compiler_result)| {
+                Box::new(compile.and_then(move |(cacheable, compiler_result)| -> BoxFuture<_> {
                     let duration = start.elapsed();
 
                     if !compiler_result.status.success() {
                         debug!("[{}]: Compiled but failed, not storing in cache",
                                out_pretty);
-                        return f_ok((CompileResult::CompileFailed, compiler_result))
-                            as SFuture<_>
+                        return Box::new(future::ok((CompileResult::CompileFailed, compiler_result)))
                     }
 
                     if cacheable != Cacheable::Yes {
                         // Not cacheable
                         debug!("[{}]: Compiled but not cacheable",
                                out_pretty);
-                        return f_ok((CompileResult::NotCacheable, compiler_result))
+                        return Box::new(future::ok((CompileResult::NotCacheable, compiler_result)))
                     }
 
                     debug!("[{}]: Compiled in {}, storing in cache", out_pretty, fmt_duration_as_secs(&duration));
@@ -281,17 +282,15 @@ pub trait CompilerHasher<T>: fmt::Debug + Send + 'static
                                     Ok(_) => debug!("[{}]: Stored in cache successfully!", out_pretty),
                                     Err(ref e) => debug!("[{}]: Cache write error: {:?}", out_pretty, e),
                                 }
-                                res.map(|duration| CacheWriteInfo {
+                                res.map(move |duration| CacheWriteInfo {
                                     object_file_pretty: out_pretty,
                                     duration: duration,
                                 })
                             });
 
-                        let future = Box::new(future);
+                        let future = Box::new(future) as BoxFuture<_>;
 
                         Ok((CompileResult::CacheMiss(miss_type, duration, future), compiler_result))
-                    }).chain_err(move || {
-                        format!("failed to store `{}` to cache", o)
                     }))
                 }))
             }))
@@ -378,7 +377,7 @@ pub enum CompileResult {
     ///
     /// The `CacheWriteFuture` will resolve when the result is finished
     /// being stored in the cache.
-    CacheMiss(MissType, Duration, SFuture<CacheWriteInfo>),
+    CacheMiss(MissType, Duration, BoxFuture<CacheWriteInfo>),
     /// Not in cache, but the compilation result was determined to be not cacheable.
     NotCacheable,
     /// Not in cache, but compilation failed.
